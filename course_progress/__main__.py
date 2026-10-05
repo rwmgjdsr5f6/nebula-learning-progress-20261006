@@ -13,6 +13,7 @@ from .core import (
     add_course,
     connect,
     get_course,
+    list_courses,
 )
 
 _ID_PATTERN = re.compile(r"[+-]?\d+")
@@ -39,6 +40,9 @@ def build_parser():
     get = subparsers.add_parser("get-course", help="按编号查询课程详情")
     get.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
     get.add_argument("course_id", help="课程编号（正整数）")
+
+    lst = subparsers.add_parser("list-courses", help="列出全部课程概览")
+    lst.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
     return parser
 
 
@@ -70,6 +74,9 @@ def main(argv=None):
                 print(str(exc), file=sys.stderr)
                 return 1
             print(json.dumps({"course_id": course_id}, ensure_ascii=False))
+            return 0
+        if args.command == "list-courses":
+            print(json.dumps({"courses": list_courses(conn)}, ensure_ascii=False))
             return 0
         course_id = parse_positive_int(args.course_id)
         if course_id is None:
