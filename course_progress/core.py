@@ -57,6 +57,27 @@ def add_course(conn, title, chapters):
     return course_id
 
 
+def list_courses(conn):
+    """查询全部课程概览，按课程编号升序返回。
+
+    每项为 {"course_id", "title", "chapter_count"}，不含章节名称；
+    数据库中没有课程时返回空列表。
+    """
+    rows = conn.execute(
+        """
+        SELECT c.id, c.title, COUNT(ch.position)
+        FROM courses AS c
+        LEFT JOIN chapters AS ch ON ch.course_id = c.id
+        GROUP BY c.id
+        ORDER BY c.id
+        """
+    )
+    return [
+        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
+        for course_id, title, chapter_count in rows
+    ]
+
+
 def get_course(conn, course_id):
     """按编号查询课程，返回 dict；不存在时返回 None。"""
     row = conn.execute(

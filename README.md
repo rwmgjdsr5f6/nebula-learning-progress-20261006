@@ -35,6 +35,20 @@ python -m course_progress --db data/course.db get-course 1
 
 退出码 0。数据库文件落盘保存，退出程序后再次查询结果一致。
 
+### 查询课程概览
+
+```bash
+python -m course_progress --db data/course.db list-courses
+```
+
+成功时标准输出为一行 JSON，`courses` 按课程编号升序排列，每项只含 `course_id`、`title`、`chapter_count`，不含章节名称：
+
+```json
+{"courses": [{"course_id": 1, "title": "Python 入门", "chapter_count": 2}]}
+```
+
+全新数据库尚未登记课程时自动建库建表，返回 `{"courses": []}`，退出码 0。同标题的课程分别列出。
+
 ### 失败结果
 
 登记失败向标准错误输出中文消息，退出码 1，标准输出为空，数据库不留下任何记录：

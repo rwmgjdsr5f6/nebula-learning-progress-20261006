@@ -9,6 +9,7 @@ from .core import (
     add_course,
     connect,
     get_course,
+    list_courses,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "add_course",
     "connect",
     "get_course",
+    "list_courses",
 ]
