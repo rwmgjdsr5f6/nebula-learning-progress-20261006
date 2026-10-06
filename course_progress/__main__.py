@@ -14,6 +14,7 @@ from .core import (
     connect,
     get_course,
     list_courses,
+    rename_course,
 )
 
 _ID_PATTERN = re.compile(r"[+-]?\d+")
@@ -40,6 +41,11 @@ def build_parser():
     get = subparsers.add_parser("get-course", help="按编号查询课程详情")
     get.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
     get.add_argument("course_id", help="课程编号（正整数）")
+
+    rename = subparsers.add_parser("rename-course", help="按编号修改课程标题")
+    rename.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
+    rename.add_argument("course_id", help="课程编号（正整数）")
+    rename.add_argument("--title", required=True, help="新的课程标题")
 
     list_courses_parser = subparsers.add_parser(
         "list-courses", help="查询全部课程概览"
@@ -90,6 +96,14 @@ def main(argv=None):
         if course_id is None:
             print(ERR_BAD_ID, file=sys.stderr)
             return 2
+        if args.command == "rename-course":
+            try:
+                result = rename_course(conn, course_id, args.title)
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
         course = get_course(conn, course_id)
         if course is None:
             print(ERR_NOT_FOUND, file=sys.stderr)

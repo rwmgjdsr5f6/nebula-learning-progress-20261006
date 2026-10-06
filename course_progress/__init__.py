@@ -10,6 +10,7 @@ from .core import (
     connect,
     get_course,
     list_courses,
+    rename_course,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "connect",
     "get_course",
     "list_courses",
+    "rename_course",
 ]

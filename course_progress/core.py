@@ -83,6 +83,25 @@ def list_courses(conn):
     ]
 
 
+def rename_course(conn, course_id, title):
+    """按编号修改课程标题，保留原编号与章节，返回更新后的概要。
+
+    新标题去除首尾空白后保存（内部空白与大小写原样保留）；改为原标题
+    或与其他课程同名均视为成功，不合并课程。课程不存在或新标题去空白
+    后为空时抛出 ValidationError，数据库保持不变。
+    """
+    title = title.strip()
+    if get_course(conn, course_id) is None:
+        raise ValidationError(ERR_NOT_FOUND)
+    if not title:
+        raise ValidationError(ERR_EMPTY_TITLE)
+    with conn:
+        conn.execute(
+            "UPDATE courses SET title = ? WHERE id = ?", (title, course_id)
+        )
+    return {"course_id": course_id, "title": title}
+
+
 def get_course(conn, course_id):
     """按编号查询课程，返回 dict；不存在时返回 None。
 
