@@ -108,6 +108,44 @@ def rename_course(conn, course_id, title):
     return {"course_id": course_id, "title": title}
 
 
+def append_chapter(conn, course_id, name):
+    """向已有课程末尾追加一个章节，返回 {"course_id", "chapter_count"}。
+
+    章节名去除首尾空白后保存（保留内部空白与大小写），新章节排在原列表
+    最后；课程标题、编号与此前章节的名称、顺序不变。按编号范围、课程
+    存在性、章节非空、重名的顺序判定：课程不存在时返回 None，即使章节
+    名为空也不抛出 ValidationError；章节名去空白后为空时抛出
+    ValidationError(ERR_EMPTY_CHAPTER)；与该课程已有章节重名（按去空白
+    后的名称比较，大小写敏感）时抛出 ValidationError(ERR_DUP_CHAPTER)。
+    校验失败不在数据库中留下任何修改。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    name = name.strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not name:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        names = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM chapters WHERE course_id = ? ORDER BY position",
+                (course_id,),
+            )
+        ]
+        if name in names:
+            raise ValidationError(ERR_DUP_CHAPTER)
+        conn.execute(
+            "INSERT INTO chapters (course_id, position, name) VALUES (?, ?, ?)",
+            (course_id, len(names), name),
+        )
+    return {"course_id": course_id, "chapter_count": len(names) + 1}
+
+
 def get_course(conn, course_id):
     """按编号查询课程，返回 dict；不存在时返回 None。
 
