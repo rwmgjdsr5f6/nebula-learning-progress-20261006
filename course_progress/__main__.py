@@ -95,6 +95,10 @@ def build_parser():
     list_courses_parser.add_argument(
         "--db", default=argparse.SUPPRESS, help="同全局 --db"
     )
+    list_courses_parser.add_argument(
+        "--title-contains",
+        help="按课程标题片段筛选：去除首尾空白后做大小写敏感的连续子串匹配",
+    )
     return parser
 
 
@@ -128,9 +132,16 @@ def main(argv=None):
             print(json.dumps({"course_id": course_id}, ensure_ascii=False))
             return 0
         if args.command == "list-courses":
+            try:
+                courses = list_courses(
+                    conn, getattr(args, "title_contains", None)
+                )
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             print(
                 json.dumps(
-                    {"courses": list_courses(conn)}, ensure_ascii=False
+                    {"courses": courses}, ensure_ascii=False
                 )
             )
             return 0

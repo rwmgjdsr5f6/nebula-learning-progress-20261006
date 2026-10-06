@@ -3,6 +3,7 @@
 import sqlite3
 
 ERR_EMPTY_TITLE = "课程标题不能为空"
+ERR_EMPTY_TITLE_FILTER = "课程标题筛选词不能为空"
 ERR_EMPTY_CHAPTER = "章节不能为空"
 ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_DUP_CHAPTER = "章节名重复"
@@ -65,12 +66,23 @@ def add_course(conn, title, chapters):
     return course_id
 
 
-def list_courses(conn):
+def list_courses(conn, title_contains=None):
     """查询全部课程概览，按课程编号升序返回。
 
     每项为 {"course_id", "title", "chapter_count"}，不含章节名称；
     数据库中没有课程时返回空列表。
+
+    title_contains 省略或为 None 时返回全部课程；否则筛选词先去除首尾
+    空白（保留内部空白与大小写），再与课程标题做大小写敏感的连续子串
+    匹配，不匹配章节名称，百分号、下划线、引号等字符一律按普通字符
+    处理。显式传入空字符串或仅含空白的筛选词时抛出
+    ValidationError(ERR_EMPTY_TITLE_FILTER)。筛选为只读操作，不修改
+    任何记录。
     """
+    if title_contains is not None:
+        title_contains = title_contains.strip()
+        if not title_contains:
+            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
     rows = conn.execute(
         """
         SELECT c.id, c.title, COUNT(ch.position)
@@ -80,10 +92,15 @@ def list_courses(conn):
         ORDER BY c.id
         """
     )
-    return [
+    courses = [
         {"course_id": course_id, "title": title, "chapter_count": chapter_count}
         for course_id, title, chapter_count in rows
     ]
+    if title_contains is not None:
+        courses = [
+            course for course in courses if title_contains in course["title"]
+        ]
+    return courses
 
 
 def rename_course(conn, course_id, title):
