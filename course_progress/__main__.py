@@ -11,6 +11,7 @@ from .core import (
     ERR_NOT_FOUND,
     ValidationError,
     add_course,
+    append_chapter,
     connect,
     get_course,
     list_courses,
@@ -48,6 +49,13 @@ def build_parser():
     rename.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
     rename.add_argument("course_id", help="课程编号（正整数）")
     rename.add_argument("--title", required=True, help="新标题")
+
+    append = subparsers.add_parser(
+        "append-chapter", help="向已有课程末尾追加一个章节"
+    )
+    append.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
+    append.add_argument("course_id", help="课程编号（正整数）")
+    append.add_argument("--chapter", help="要追加的章节名")
 
     list_courses_parser = subparsers.add_parser(
         "list-courses", help="查询全部课程概览"
@@ -108,6 +116,17 @@ def main(argv=None):
                 print(ERR_NOT_FOUND, file=sys.stderr)
                 return 1
             print(json.dumps(renamed, ensure_ascii=False))
+            return 0
+        if args.command == "append-chapter":
+            try:
+                appended = append_chapter(conn, course_id, args.chapter)
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if appended is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(appended, ensure_ascii=False))
             return 0
         course = get_course(conn, course_id)
         if course is None:
