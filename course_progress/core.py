@@ -83,6 +83,31 @@ def list_courses(conn):
     ]
 
 
+def rename_course(conn, course_id, title):
+    """按编号修改课程标题，返回 {"course_id", "title"}；课程不存在返回 None。
+
+    新标题去除首尾空白后保存（保留内部空白与大小写）。按编号范围、课程
+    存在性、标题非空的顺序判定：课程不存在时返回 None，即使标题为空也不
+    抛出 ValidationError；课程存在但标题去空白后为空时抛出 ValidationError。
+    仅更新标题，课程编号与章节的名称、数量、顺序不变。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    title = title.strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not title:
+            raise ValidationError(ERR_EMPTY_TITLE)
+        conn.execute(
+            "UPDATE courses SET title = ? WHERE id = ?", (title, course_id)
+        )
+    return {"course_id": course_id, "title": title}
+
+
 def get_course(conn, course_id):
     """按编号查询课程，返回 dict；不存在时返回 None。
 
