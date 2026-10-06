@@ -3,6 +3,7 @@
 import sqlite3
 
 ERR_EMPTY_TITLE = "课程标题不能为空"
+ERR_EMPTY_TITLE_FILTER = "课程标题筛选词不能为空"
 ERR_EMPTY_CHAPTER = "章节不能为空"
 ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_DUP_CHAPTER = "章节名重复"
@@ -65,12 +66,24 @@ def add_course(conn, title, chapters):
     return course_id
 
 
-def list_courses(conn):
+def list_courses(conn, title_contains=None):
     """查询全部课程概览，按课程编号升序返回。
 
     每项为 {"course_id", "title", "chapter_count"}，不含章节名称；
     数据库中没有课程时返回空列表。
+
+    title_contains 为 None（或省略）时返回全部课程；否则筛选词先去除
+    首尾空白（保留内部空白），再与课程标题做大小写敏感的连续子串匹配，
+    不匹配章节名称；百分号、下划线、引号等字符一律按普通字符处理，
+    不具有通配含义。显式传入空字符串或仅含空白的筛选词时抛出
+    ValidationError。匹配在 Python 侧完成，避免 SQLite LIKE 对 ASCII
+    字符默认大小写不敏感。
     """
+    needle = None
+    if title_contains is not None:
+        needle = title_contains.strip()
+        if not needle:
+            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
     rows = conn.execute(
         """
         SELECT c.id, c.title, COUNT(ch.position)
@@ -80,6 +93,8 @@ def list_courses(conn):
         ORDER BY c.id
         """
     )
+    if needle is not None:
+        rows = (row for row in rows if needle in row[1])
     return [
         {"course_id": course_id, "title": title, "chapter_count": chapter_count}
         for course_id, title, chapter_count in rows
