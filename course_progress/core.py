@@ -4,6 +4,7 @@ import sqlite3
 
 ERR_EMPTY_TITLE = "课程标题不能为空"
 ERR_EMPTY_CHAPTER = "章节不能为空"
+ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_DUP_CHAPTER = "章节名重复"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
@@ -147,6 +148,60 @@ def append_chapter(conn, course_id, name):
             (course_id, position, name),
         )
     return {"course_id": course_id, "chapter_count": position + 1}
+
+
+def rename_chapter(conn, course_id, chapter, name):
+    """修改已有课程中单个章节的名称，返回与 get_course 同结构的课程详情；
+    课程不存在返回 None。
+
+    原章节名与新名称均去除首尾空白（保留内部空白与大小写）；原名称按
+    大小写敏感的精确匹配在该课程的章节中定位。按编号范围、课程存在性、
+    原名称非空、章节存在、新名称非空、重名的顺序判定：课程不存在时返回
+    None，即使名称为空也不抛出 ValidationError；原名称去首尾空白后为空
+    时抛出 ValidationError(ERR_EMPTY_CHAPTER)；原名称非空但该课程中没有
+    此章节时抛出 ValidationError(ERR_CHAPTER_NOT_FOUND)；新名称去首尾空白
+    后为空时抛出 ValidationError(ERR_EMPTY_CHAPTER)；新名称与同课程其他
+    章节重名（大小写敏感；与目标章节自身当前名称相同不算重复，其他课程
+    的同名章节不影响）时抛出 ValidationError(ERR_DUP_CHAPTER)。
+    仅替换目标章节的名称，课程编号、标题、章节数量与顺序不变。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    chapter = (chapter or "").strip()
+    name = (name or "").strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not chapter:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        existing = [
+            (position, chapter_name)
+            for position, chapter_name in conn.execute(
+                "SELECT position, name FROM chapters WHERE course_id = ?"
+                " ORDER BY position",
+                (course_id,),
+            )
+        ]
+        positions = {chapter_name: position for position, chapter_name in existing}
+        if chapter not in positions:
+            raise ValidationError(ERR_CHAPTER_NOT_FOUND)
+        if not name:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        target_position = positions[chapter]
+        if any(
+            chapter_name == name
+            for position, chapter_name in existing
+            if position != target_position
+        ):
+            raise ValidationError(ERR_DUP_CHAPTER)
+        conn.execute(
+            "UPDATE chapters SET name = ? WHERE course_id = ? AND position = ?",
+            (name, course_id, target_position),
+        )
+    return get_course(conn, course_id)
 
 
 def get_course(conn, course_id):
