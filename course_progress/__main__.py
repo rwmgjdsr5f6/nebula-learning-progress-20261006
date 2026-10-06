@@ -17,6 +17,7 @@ from .core import (
     list_courses,
     rename_chapter,
     rename_course,
+    reorder_chapters,
 )
 
 _ID_PATTERN = re.compile(r"[+-]?\d+")
@@ -67,6 +68,18 @@ def build_parser():
     rename_chapter_parser.add_argument("course_id", help="课程编号（正整数）")
     rename_chapter_parser.add_argument("--chapter", help="要改名的原章节名")
     rename_chapter_parser.add_argument("--name", help="新章节名")
+
+    reorder = subparsers.add_parser(
+        "reorder-chapters", help="重排已有课程的全部章节顺序"
+    )
+    reorder.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
+    reorder.add_argument("course_id", help="课程编号（正整数）")
+    reorder.add_argument(
+        "--chapter",
+        action="append",
+        default=[],
+        help="章节名，可重复；出现顺序即新的章节顺序，须与现有章节一一对应",
+    )
 
     list_courses_parser = subparsers.add_parser(
         "list-courses", help="查询全部课程概览"
@@ -151,6 +164,17 @@ def main(argv=None):
                 print(ERR_NOT_FOUND, file=sys.stderr)
                 return 1
             print(json.dumps(renamed, ensure_ascii=False))
+            return 0
+        if args.command == "reorder-chapters":
+            try:
+                reordered = reorder_chapters(conn, course_id, args.chapter)
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if reordered is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(reordered, ensure_ascii=False))
             return 0
         course = get_course(conn, course_id)
         if course is None:

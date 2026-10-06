@@ -6,6 +6,7 @@ ERR_EMPTY_TITLE = "课程标题不能为空"
 ERR_EMPTY_CHAPTER = "章节不能为空"
 ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_DUP_CHAPTER = "章节名重复"
+ERR_CHAPTER_LIST_MISMATCH = "章节列表与现有章节不一致"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
 
@@ -201,6 +202,57 @@ def rename_chapter(conn, course_id, chapter, name):
             "UPDATE chapters SET name = ? WHERE course_id = ? AND position = ?",
             (name, course_id, target_position),
         )
+    return get_course(conn, course_id)
+
+
+def reorder_chapters(conn, course_id, chapters):
+    """重排已有课程的全部章节，返回与 get_course 同结构的课程详情；
+    课程不存在返回 None。
+
+    每个章节名去除首尾空白（保留内部空白与大小写），按大小写敏感的
+    精确匹配与现有章节对应；给出的顺序即新的章节顺序。按编号范围、
+    课程存在性、章节非空、重名、列表一致性的顺序判定：课程不存在时
+    返回 None，即使章节列表为空也不抛出 ValidationError；列表为空或
+    任一名称去首尾空白后为空时抛出 ValidationError(ERR_EMPTY_CHAPTER)；
+    去空白后名称重复时抛出 ValidationError(ERR_DUP_CHAPTER)；其余情况
+    下遗漏现有章节或包含未知名称（数量不符、名称增删或改名）时抛出
+    ValidationError(ERR_CHAPTER_LIST_MISMATCH)。仅调整章节顺序，课程
+    编号、标题、章节名称与数量不变；校验失败时不修改任何数据。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    names = [name.strip() for name in chapters]
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not names or any(not name for name in names):
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        if len(set(names)) != len(names):
+            raise ValidationError(ERR_DUP_CHAPTER)
+        existing = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM chapters WHERE course_id = ?"
+                " ORDER BY position",
+                (course_id,),
+            )
+        ]
+        if set(names) != set(existing):
+            raise ValidationError(ERR_CHAPTER_LIST_MISMATCH)
+        # 先整体平移 position 避开主键冲突，再按新顺序落位
+        conn.execute(
+            "UPDATE chapters SET position = position + ? WHERE course_id = ?",
+            (len(existing), course_id),
+        )
+        for position, name in enumerate(names):
+            conn.execute(
+                "UPDATE chapters SET position = ?"
+                " WHERE course_id = ? AND name = ?",
+                (position, course_id, name),
+            )
     return get_course(conn, course_id)
 
 
