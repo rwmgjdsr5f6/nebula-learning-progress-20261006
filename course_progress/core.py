@@ -7,6 +7,7 @@ ERR_EMPTY_CHAPTER = "章节不能为空"
 ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_DUP_CHAPTER = "章节名重复"
 ERR_CHAPTER_LIST_MISMATCH = "章节列表与现有章节不一致"
+ERR_LAST_CHAPTER = "课程至少保留一个章节"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
 
@@ -248,6 +249,73 @@ def reorder_chapters(conn, course_id, chapters):
             (len(existing), course_id),
         )
         for position, name in enumerate(names):
+            conn.execute(
+                "UPDATE chapters SET position = ?"
+                " WHERE course_id = ? AND name = ?",
+                (position, course_id, name),
+            )
+    return get_course(conn, course_id)
+
+
+def remove_chapter(conn, course_id, chapter):
+    """删除已有课程中的单个章节，返回与 get_course 同结构的课程详情；
+    课程不存在返回 None。
+
+    章节名去除首尾空白（保留内部空白与大小写），按大小写敏感的精确匹配
+    在该课程的章节中定位；删除后其余章节相对顺序不变、position 重新连续。
+    按编号范围、课程存在性、名称非空、章节存在、是否唯一章节的顺序判定：
+    课程不存在时返回 None，即使名称为空也不抛出 ValidationError；名称去
+    首尾空白后为空时抛出 ValidationError(ERR_EMPTY_CHAPTER)；名称非空但
+    该课程中没有此章节时抛出 ValidationError(ERR_CHAPTER_NOT_FOUND)；该
+    章节是课程唯一章节时抛出 ValidationError(ERR_LAST_CHAPTER)。仅删除
+    目标章节，课程编号、标题、其他课程均不变；校验失败时不修改任何数据。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    chapter = (chapter or "").strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not chapter:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        existing = [
+            (position, chapter_name)
+            for position, chapter_name in conn.execute(
+                "SELECT position, name FROM chapters WHERE course_id = ?"
+                " ORDER BY position",
+                (course_id,),
+            )
+        ]
+        target_position = next(
+            (
+                position
+                for position, chapter_name in existing
+                if chapter_name == chapter
+            ),
+            None,
+        )
+        if target_position is None:
+            raise ValidationError(ERR_CHAPTER_NOT_FOUND)
+        if len(existing) == 1:
+            raise ValidationError(ERR_LAST_CHAPTER)
+        remaining = [
+            chapter_name
+            for position, chapter_name in existing
+            if position != target_position
+        ]
+        # 先整体平移 position 避开主键冲突，再删掉目标章节并按剩余顺序落位
+        conn.execute(
+            "UPDATE chapters SET position = position + ? WHERE course_id = ?",
+            (len(existing), course_id),
+        )
+        conn.execute(
+            "DELETE FROM chapters WHERE course_id = ? AND position = ?",
+            (course_id, target_position + len(existing)),
+        )
+        for position, name in enumerate(remaining):
             conn.execute(
                 "UPDATE chapters SET position = ?"
                 " WHERE course_id = ? AND name = ?",

@@ -15,6 +15,7 @@ from .core import (
     connect,
     get_course,
     list_courses,
+    remove_chapter,
     rename_chapter,
     rename_course,
     reorder_chapters,
@@ -80,6 +81,13 @@ def build_parser():
         default=[],
         help="章节名，可重复；出现顺序即新的章节顺序，须与现有章节一一对应",
     )
+
+    remove = subparsers.add_parser(
+        "remove-chapter", help="删除已有课程中的单个章节（至少保留一章）"
+    )
+    remove.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
+    remove.add_argument("course_id", help="课程编号（正整数）")
+    remove.add_argument("--chapter", help="要删除的章节名")
 
     list_courses_parser = subparsers.add_parser(
         "list-courses", help="查询全部课程概览"
@@ -175,6 +183,17 @@ def main(argv=None):
                 print(ERR_NOT_FOUND, file=sys.stderr)
                 return 1
             print(json.dumps(reordered, ensure_ascii=False))
+            return 0
+        if args.command == "remove-chapter":
+            try:
+                removed = remove_chapter(conn, course_id, args.chapter)
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if removed is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(removed, ensure_ascii=False))
             return 0
         course = get_course(conn, course_id)
         if course is None:
