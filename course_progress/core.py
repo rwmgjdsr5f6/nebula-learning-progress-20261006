@@ -26,6 +26,11 @@ class ValidationError(Exception):
     """登记内容校验失败，消息为面向用户的中文提示。"""
 
 
+# SQLite 整数为 64 位有符号；超出该范围的编号不可能存在于库中。
+_SQLITE_INT64_MIN = -(2**63)
+_SQLITE_INT64_MAX = 2**63 - 1
+
+
 def connect(db_path):
     """打开（必要时创建）数据库并确保表结构存在。父目录需已存在。"""
     conn = sqlite3.connect(db_path)
@@ -79,7 +84,13 @@ def list_courses(conn):
 
 
 def get_course(conn, course_id):
-    """按编号查询课程，返回 dict；不存在时返回 None。"""
+    """按编号查询课程，返回 dict；不存在时返回 None。
+
+    超出 SQLite 整数范围的编号不可能对应任何课程，直接返回 None，
+    避免把 OverflowError 暴露给调用方。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
     row = conn.execute(
         "SELECT title FROM courses WHERE id = ?", (course_id,)
     ).fetchone()
