@@ -17,6 +17,7 @@ from .core import (
     list_courses,
     rename_chapter,
     rename_course,
+    remove_chapter,
     reorder_chapters,
 )
 
@@ -68,6 +69,15 @@ def build_parser():
     rename_chapter_parser.add_argument("course_id", help="课程编号（正整数）")
     rename_chapter_parser.add_argument("--chapter", help="要改名的原章节名")
     rename_chapter_parser.add_argument("--name", help="新章节名")
+
+    remove_chapter_parser = subparsers.add_parser(
+        "remove-chapter", help="删除已有课程中的单个章节（至少保留一章）"
+    )
+    remove_chapter_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+    remove_chapter_parser.add_argument("course_id", help="课程编号（正整数）")
+    remove_chapter_parser.add_argument("--chapter", help="要删除的章节名")
 
     reorder = subparsers.add_parser(
         "reorder-chapters", help="重排已有课程的全部章节顺序"
@@ -164,6 +174,17 @@ def main(argv=None):
                 print(ERR_NOT_FOUND, file=sys.stderr)
                 return 1
             print(json.dumps(renamed, ensure_ascii=False))
+            return 0
+        if args.command == "remove-chapter":
+            try:
+                removed = remove_chapter(conn, course_id, args.chapter)
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if removed is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(removed, ensure_ascii=False))
             return 0
         if args.command == "reorder-chapters":
             try:

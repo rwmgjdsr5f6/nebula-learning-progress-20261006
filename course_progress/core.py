@@ -7,6 +7,7 @@ ERR_EMPTY_CHAPTER = "章节不能为空"
 ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_DUP_CHAPTER = "章节名重复"
 ERR_CHAPTER_LIST_MISMATCH = "章节列表与现有章节不一致"
+ERR_LAST_CHAPTER = "课程至少保留一个章节"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
 
@@ -253,6 +254,58 @@ def reorder_chapters(conn, course_id, chapters):
                 " WHERE course_id = ? AND name = ?",
                 (position, course_id, name),
             )
+    return get_course(conn, course_id)
+
+
+def remove_chapter(conn, course_id, chapter):
+    """删除已有课程中的单个章节，返回与 get_course 同结构的课程详情；
+    课程不存在返回 None。
+
+    章节名去除首尾空白（保留内部空白与大小写），按大小写敏感的精确匹配
+    在该课程的章节中定位。按编号范围、课程存在性、名称非空、章节存在、
+    是否为唯一章节的顺序判定：课程不存在时返回 None，即使章节名为空也不
+    抛出 ValidationError；章节名去首尾空白后为空时抛出
+    ValidationError(ERR_EMPTY_CHAPTER)；名称非空但该课程中没有此章节时
+    抛出 ValidationError(ERR_CHAPTER_NOT_FOUND)；该章节是课程唯一章节时
+    抛出 ValidationError(ERR_LAST_CHAPTER)。删除后剩余章节的相对顺序不
+    变（position 重新压紧为从 0 起的连续编号），课程编号、标题与其他课
+    程均不变；校验失败时不修改任何数据。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    chapter = (chapter or "").strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not chapter:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        existing = [
+            (position, chapter_name)
+            for position, chapter_name in conn.execute(
+                "SELECT position, name FROM chapters WHERE course_id = ?"
+                " ORDER BY position",
+                (course_id,),
+            )
+        ]
+        positions = {chapter_name: position for position, chapter_name in existing}
+        if chapter not in positions:
+            raise ValidationError(ERR_CHAPTER_NOT_FOUND)
+        if len(existing) == 1:
+            raise ValidationError(ERR_LAST_CHAPTER)
+        target_position = positions[chapter]
+        conn.execute(
+            "DELETE FROM chapters WHERE course_id = ? AND position = ?",
+            (course_id, target_position),
+        )
+        # 被删位置之后的章节前移一位，剩余 position 从 0 连续，相对顺序不变
+        conn.execute(
+            "UPDATE chapters SET position = position - 1"
+            " WHERE course_id = ? AND position > ?",
+            (course_id, target_position),
+        )
     return get_course(conn, course_id)
 
 
