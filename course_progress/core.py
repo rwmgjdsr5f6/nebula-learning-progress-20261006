@@ -5,6 +5,7 @@ import sqlite3
 ERR_EMPTY_TITLE = "课程标题不能为空"
 ERR_EMPTY_CHAPTER = "章节不能为空"
 ERR_DUP_CHAPTER = "章节名重复"
+ERR_CHAPTER_NOT_FOUND = "章节不存在"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
 
@@ -147,6 +148,57 @@ def append_chapter(conn, course_id, name):
             (course_id, position, name),
         )
     return {"course_id": course_id, "chapter_count": position + 1}
+
+
+def rename_chapter(conn, course_id, chapter, name):
+    """重命名已有课程中的单个章节，返回与 get_course 相同结构的课程详情；
+    课程不存在返回 None。
+
+    原章节名与新名称均去除首尾空白（保留内部空白与大小写），原名称按
+    大小写敏感的精确匹配在该课程中定位章节。按编号范围、课程存在性、
+    原名称非空、章节存在、新名称非空、新名称重名的顺序判定：课程不存在
+    时返回 None；原名称去首尾空白后为空时抛出
+    ValidationError(ERR_EMPTY_CHAPTER)；原名称非空但该课程中无此章节时
+    抛出 ValidationError(ERR_CHAPTER_NOT_FOUND)；新名称去首尾空白后为空
+    时抛出 ValidationError(ERR_EMPTY_CHAPTER)；新名称与该课程其他章节
+    重名（大小写敏感；与目标章节自身同名不算冲突，其他课程的同名章节
+    不影响）时抛出 ValidationError(ERR_DUP_CHAPTER)。仅替换目标章节的
+    名称，课程编号、标题、章节数量与顺序不变；新名称与原名称相同时不
+    新增章节，仍视为成功。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    chapter = (chapter or "").strip()
+    name = (name or "").strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not chapter:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        existing = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM chapters WHERE course_id = ?"
+                " ORDER BY position",
+                (course_id,),
+            )
+        ]
+        if chapter not in existing:
+            raise ValidationError(ERR_CHAPTER_NOT_FOUND)
+        if not name:
+            raise ValidationError(ERR_EMPTY_CHAPTER)
+        if name != chapter and name in existing:
+            raise ValidationError(ERR_DUP_CHAPTER)
+        position = existing.index(chapter)
+        conn.execute(
+            "UPDATE chapters SET name = ?"
+            " WHERE course_id = ? AND position = ?",
+            (name, course_id, position),
+        )
+    return get_course(conn, course_id)
 
 
 def get_course(conn, course_id):

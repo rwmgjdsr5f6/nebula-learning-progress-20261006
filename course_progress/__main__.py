@@ -15,6 +15,7 @@ from .core import (
     connect,
     get_course,
     list_courses,
+    rename_chapter,
     rename_course,
 )
 
@@ -56,6 +57,16 @@ def build_parser():
     append.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
     append.add_argument("course_id", help="课程编号（正整数）")
     append.add_argument("--chapter", help="要追加的章节名")
+
+    rename_chapter_parser = subparsers.add_parser(
+        "rename-chapter", help="重命名已有课程中的单个章节"
+    )
+    rename_chapter_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+    rename_chapter_parser.add_argument("course_id", help="课程编号（正整数）")
+    rename_chapter_parser.add_argument("--chapter", help="原章节名")
+    rename_chapter_parser.add_argument("--name", help="新章节名")
 
     list_courses_parser = subparsers.add_parser(
         "list-courses", help="查询全部课程概览"
@@ -127,6 +138,19 @@ def main(argv=None):
                 print(ERR_NOT_FOUND, file=sys.stderr)
                 return 1
             print(json.dumps(appended, ensure_ascii=False))
+            return 0
+        if args.command == "rename-chapter":
+            try:
+                renamed_chapter = rename_chapter(
+                    conn, course_id, args.chapter, args.name
+                )
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if renamed_chapter is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(renamed_chapter, ensure_ascii=False))
             return 0
         course = get_course(conn, course_id)
         if course is None:
