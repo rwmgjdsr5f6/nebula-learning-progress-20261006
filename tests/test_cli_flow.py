@@ -204,5 +204,82 @@ class TestGetFailures(CliTestCase):
         self.assert_failure(result, 2, "课程编号必须为正整数")
 
 
+class TestGetOutOfRangeId(CliTestCase):
+    """超出 SQLite 整数范围的正整数编号按未知课程处理，不抛异常。"""
+
+    SQLITE_INT_MAX_TEXT = "9223372036854775807"
+    OVERFLOW_ID_TEXT = "9223372036854775808"
+    MANY_NINES_TEXT = "9" * 26
+
+    def assert_not_found(self, result):
+        # 单行错误写标准错误，标准输出为空，退出码 1，无异常堆栈
+        self.assert_failure(result, 1, "课程不存在")
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_sqlite_int_max_is_queried_normally(self):
+        result = run_cli(self.db_path, "get-course", self.SQLITE_INT_MAX_TEXT)
+        self.assert_not_found(result)
+
+    def test_overflow_id_reports_not_found(self):
+        result = run_cli(self.db_path, "get-course", self.OVERFLOW_ID_TEXT)
+        self.assert_not_found(result)
+
+    def test_many_nines_id_reports_not_found(self):
+        result = run_cli(self.db_path, "get-course", self.MANY_NINES_TEXT)
+        self.assert_not_found(result)
+
+    def test_overflow_id_with_plus_sign_and_whitespace(self):
+        result = run_cli(
+            self.db_path, "get-course", "  +9223372036854775808  "
+        )
+        self.assert_not_found(result)
+
+    def test_overflow_id_with_leading_zeros(self):
+        result = run_cli(self.db_path, "get-course", "009223372036854775808")
+        self.assert_not_found(result)
+
+    def test_invalid_ids_still_rejected(self):
+        for raw in ("0", "-1", "abc", "1.5"):
+            with self.subTest(raw=raw):
+                result = run_cli(self.db_path, "get-course", raw)
+                self.assert_failure(result, 2, "课程编号必须为正整数")
+
+    def test_failed_overflow_query_leaves_database_untouched(self):
+        added = add_valid_course(self.db_path)
+        self.assertEqual(added.returncode, 0)
+        self.assertEqual(json.loads(added.stdout), {"course_id": 1})
+
+        result = run_cli(self.db_path, "get-course", self.OVERFLOW_ID_TEXT)
+        self.assert_not_found(result)
+
+        # 查询失败不新增或改写课程、章节，已有课程仍按原顺序读取
+        got = run_cli(self.db_path, "get-course", "1")
+        self.assertEqual(got.returncode, 0)
+        self.assertEqual(got.stderr, "")
+        self.assertEqual(
+            json.loads(got.stdout),
+            {
+                "course_id": 1,
+                "title": STRIPPED_TITLE,
+                "chapters": STRIPPED_CHAPTERS,
+            },
+        )
+
+        # 失败查询不消耗后续登记编号
+        added_next = add_valid_course(self.db_path)
+        self.assertEqual(added_next.returncode, 0)
+        self.assertEqual(json.loads(added_next.stdout), {"course_id": 2})
+
+    def test_get_course_returns_none_for_out_of_range_int(self):
+        from course_progress.core import connect, get_course
+
+        conn = connect(str(self.db_path))
+        self.addCleanup(conn.close)
+        self.assertIsNone(get_course(conn, 2**63))
+        self.assertIsNone(get_course(conn, 10**25))
+        self.assertIsNone(get_course(conn, 2**63 - 1))
+        self.assertIsNone(get_course(conn, 1))
+
+
 if __name__ == "__main__":
     unittest.main()
