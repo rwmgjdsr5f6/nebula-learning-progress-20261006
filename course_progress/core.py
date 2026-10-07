@@ -479,6 +479,36 @@ def enroll_learner(conn, learner_id, course_id):
     return {"learner_id": learner_id, "course_id": course_id}
 
 
+def unenroll_learner(conn, learner_id, course_id):
+    """取消学员与课程的报名关系，返回 {"learner_id", "course_id"}；
+    学员或课程不存在时返回 None，且不修改任何记录。
+
+    从未报名或已经取消时同样成功并返回相同内容；仅移除该编号组合的
+    报名关系，不删除课程或学员，不影响其他编号组合，也不产生学习进度
+    或结业结果。超出 SQLite 整数范围的编号按不存在处理。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return None
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "DELETE FROM enrollments WHERE learner_id = ? AND course_id = ?",
+            (learner_id, course_id),
+        )
+    return {"learner_id": learner_id, "course_id": course_id}
+
+
 def list_learner_courses(conn, learner_id):
     """查询一个学员已报名的课程，按课程编号升序返回；学员不存在返回 None。
 

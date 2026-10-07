@@ -28,6 +28,7 @@ from .core import (
     rename_course,
     rename_learner,
     reorder_chapters,
+    unenroll_learner,
 )
 
 _ID_PATTERN = re.compile(r"[+-]?\d+")
@@ -146,6 +147,13 @@ def build_parser():
     enroll.add_argument("learner_id", help="学员编号（正整数）")
     enroll.add_argument("--course", required=True, help="课程编号（正整数）")
 
+    unenroll = subparsers.add_parser(
+        "unenroll-learner", help="取消一个学员对一门课程的报名"
+    )
+    unenroll.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
+    unenroll.add_argument("learner_id", help="学员编号（正整数）")
+    unenroll.add_argument("--course", required=True, help="课程编号（正整数）")
+
     list_course_learners_parser = subparsers.add_parser(
         "list-course-learners", help="查询一门课程的报名名册"
     )
@@ -238,6 +246,24 @@ def main(argv=None):
                 return 1
             enrolled = enroll_learner(conn, learner_id, course_id)
             print(json.dumps(enrolled, ensure_ascii=False))
+            return 0
+        if args.command == "unenroll-learner":
+            learner_id = parse_positive_int(args.learner_id)
+            if learner_id is None:
+                print(ERR_BAD_LEARNER_ID, file=sys.stderr)
+                return 2
+            course_id = parse_positive_int(args.course)
+            if course_id is None:
+                print(ERR_BAD_ID, file=sys.stderr)
+                return 2
+            if get_learner(conn, learner_id) is None:
+                print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
+                return 1
+            if get_course(conn, course_id) is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            unenrolled = unenroll_learner(conn, learner_id, course_id)
+            print(json.dumps(unenrolled, ensure_ascii=False))
             return 0
         if args.command == "list-course-learners":
             course_id = parse_positive_int(args.course_id)
