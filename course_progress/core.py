@@ -489,29 +489,47 @@ def get_learner(conn, learner_id):
     return {"learner_id": learner_id, "name": row[0]}
 
 
-def enroll_learner(conn, learner_id, course_id):
-    """登记学员与课程的报名关系，返回 {"learner_id", "course_id"}；
-    学员或课程不存在时返回 None，且不写入任何记录。
+def _resolve_enrollment_target(conn, learner_id, course_id):
+    """报名与取消报名共用的目标校验，通过时返回 (learner_id, course_id)，
+    否则返回 None。
 
-    一个学员可报名多门课程，一门课程可接收多个学员；同一编号组合重复
-    报名仍成功并返回相同内容，名册中只保留一条记录。超出 SQLite 整数
-    范围的编号按不存在处理。仅记录报名关系，不产生学习进度或结业结果。
+    两种操作的共同目标判定——两个编号都落在 SQLite 64 位有符号整数范围
+    内、学员存在、课程存在（按此顺序短路）——在此一处维护：命令行虽然已
+    做过同一套前置校验，两个存储函数被直接调用时仍各自独立经过本判定，
+    不依赖调用方预先检查。超出范围的编号按不存在处理，避免把
+    OverflowError 暴露给调用方。本函数只读取证，不开启事务也不修改任何
+    记录；是否写入、写入什么由调用方在自己的事务中决定。
     """
     if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
         return None
     if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
         return None
+    if conn.execute(
+        "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+    ).fetchone() is None:
+        return None
+    if conn.execute(
+        "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+    ).fetchone() is None:
+        return None
+    return learner_id, course_id
+
+
+def enroll_learner(conn, learner_id, course_id):
+    """登记学员与课程的报名关系，返回 {"learner_id", "course_id"}；
+    学员或课程不存在时返回 None，且不写入任何记录。
+
+    一个学员可报名多门课程，一门课程可接收多个学员；同一编号组合重复
+    报名仍成功并返回相同内容，名册中只保留一条记录。目标是否有效的判定
+    （编号范围与学员、课程存在性）与取消报名共用
+    _resolve_enrollment_target，本函数被直接调用时同样独立校验。仅记录
+    报名关系，不产生学习进度或结业结果。
+    """
     with conn:
-        row = conn.execute(
-            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
-        ).fetchone()
-        if row is None:
+        target = _resolve_enrollment_target(conn, learner_id, course_id)
+        if target is None:
             return None
-        row = conn.execute(
-            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-        ).fetchone()
-        if row is None:
-            return None
+        learner_id, course_id = target
         conn.execute(
             "INSERT OR IGNORE INTO enrollments (learner_id, course_id)"
             " VALUES (?, ?)",
@@ -525,24 +543,15 @@ def unenroll_learner(conn, learner_id, course_id):
     学员或课程不存在时返回 None，且不修改任何记录。
 
     从未报名或已经取消的编号组合同样成功并返回相同内容；只移除该编号
-    组合的关系，课程、学员及其他报名关系不变。超出 SQLite 整数范围的
-    编号按不存在处理。不产生学习进度或结业结果。
+    组合的关系，课程、学员及其他报名关系不变。目标是否有效的判定
+    （编号范围与学员、课程存在性）与报名共用 _resolve_enrollment_target，
+    本函数被直接调用时同样独立校验。不产生学习进度或结业结果。
     """
-    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
-        return None
-    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
-        return None
     with conn:
-        row = conn.execute(
-            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
-        ).fetchone()
-        if row is None:
+        target = _resolve_enrollment_target(conn, learner_id, course_id)
+        if target is None:
             return None
-        row = conn.execute(
-            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-        ).fetchone()
-        if row is None:
-            return None
+        learner_id, course_id = target
         conn.execute(
             "DELETE FROM enrollments WHERE learner_id = ? AND course_id = ?",
             (learner_id, course_id),
