@@ -401,3 +401,29 @@ def get_learner(conn, learner_id):
     if row is None:
         return None
     return {"learner_id": learner_id, "name": row[0]}
+
+
+def rename_learner(conn, learner_id, name):
+    """按编号修改学员姓名，返回 {"learner_id", "name"}；学员不存在返回 None。
+
+    新姓名去除首尾空白后保存（保留内部空白、中文、标点与大小写）。按编号
+    范围、学员存在性、姓名非空的顺序判定：学员不存在时返回 None，即使姓名
+    为空也不抛出 ValidationError；学员存在但姓名去首尾空白后为空时抛出
+    ValidationError(ERR_EMPTY_LEARNER_NAME)。仅更新姓名，学员编号不变；
+    改为原姓名同样成功；允许与其他学员同名，不合并记录。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return None
+    name = (name or "").strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not name:
+            raise ValidationError(ERR_EMPTY_LEARNER_NAME)
+        conn.execute(
+            "UPDATE learners SET name = ? WHERE id = ?", (name, learner_id)
+        )
+    return {"learner_id": learner_id, "name": name}

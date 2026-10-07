@@ -17,6 +17,7 @@ from .core import (
     get_learner,
     list_courses,
     rename_course,
+    rename_learner,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "get_learner",
     "list_courses",
     "rename_course",
+    "rename_learner",
 ]
