@@ -387,6 +387,32 @@ def add_learner(conn, name):
     return learner_id
 
 
+def rename_learner(conn, learner_id, name):
+    """按编号修改学员姓名，返回 {"learner_id", "name"}；学员不存在返回 None。
+
+    新姓名去除首尾空白后保存（保留内部空白与大小写）。按编号范围、学员
+    存在性、姓名非空的顺序判定：学员不存在时返回 None，即使姓名为空也不
+    抛出 ValidationError；学员存在但姓名去空白后为空时抛出
+    ValidationError(ERR_EMPTY_LEARNER_NAME)。允许与其他学员同名，不合并
+    记录；仅更新目标学员的姓名，编号与其他学员、课程数据均不变。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return None
+    name = (name or "").strip()
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        if not name:
+            raise ValidationError(ERR_EMPTY_LEARNER_NAME)
+        conn.execute(
+            "UPDATE learners SET name = ? WHERE id = ?", (name, learner_id)
+        )
+    return {"learner_id": learner_id, "name": name}
+
+
 def get_learner(conn, learner_id):
     """按编号查询学员，返回 {"learner_id", "name"}；不存在时返回 None。
 

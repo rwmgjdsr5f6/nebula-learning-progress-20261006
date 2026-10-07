@@ -22,6 +22,7 @@ from .core import (
     remove_chapter,
     rename_chapter,
     rename_course,
+    rename_learner,
     reorder_chapters,
 )
 
@@ -117,6 +118,15 @@ def build_parser():
         "--db", default=argparse.SUPPRESS, help="同全局 --db"
     )
     get_learner_parser.add_argument("learner_id", help="学员编号（正整数）")
+
+    rename_learner_parser = subparsers.add_parser(
+        "rename-learner", help="按编号修改学员姓名（编号不变）"
+    )
+    rename_learner_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+    rename_learner_parser.add_argument("learner_id", help="学员编号（正整数）")
+    rename_learner_parser.add_argument("--name", help="新姓名")
     return parser
 
 
@@ -181,6 +191,21 @@ def main(argv=None):
                 print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
                 return 1
             print(json.dumps(learner, ensure_ascii=False))
+            return 0
+        if args.command == "rename-learner":
+            learner_id = parse_positive_int(args.learner_id)
+            if learner_id is None:
+                print(ERR_BAD_LEARNER_ID, file=sys.stderr)
+                return 2
+            try:
+                renamed = rename_learner(conn, learner_id, args.name)
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            if renamed is None:
+                print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(renamed, ensure_ascii=False))
             return 0
         course_id = parse_positive_int(args.course_id)
         if course_id is None:
