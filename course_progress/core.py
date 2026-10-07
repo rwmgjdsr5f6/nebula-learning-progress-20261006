@@ -11,6 +11,9 @@ ERR_CHAPTER_LIST_MISMATCH = "章节列表与现有章节不一致"
 ERR_LAST_CHAPTER = "课程至少保留一个章节"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
+ERR_EMPTY_LEARNER_NAME = "学员姓名不能为空"
+ERR_LEARNER_NOT_FOUND = "学员不存在"
+ERR_BAD_LEARNER_ID = "学员编号必须为正整数"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS courses (
@@ -22,6 +25,10 @@ CREATE TABLE IF NOT EXISTS chapters (
     position INTEGER NOT NULL,
     name TEXT NOT NULL,
     PRIMARY KEY (course_id, position)
+);
+CREATE TABLE IF NOT EXISTS learners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL
 );
 """
 
@@ -362,3 +369,35 @@ def get_course(conn, course_id):
         )
     ]
     return {"course_id": course_id, "title": row[0], "chapters": chapters}
+
+
+def add_learner(conn, name):
+    """登记一名学员，返回新学员编号。
+
+    姓名去除首尾空白后保存（保留内部空白与大小写）；同名学员分别登记，
+    不合并记录。姓名去空白后为空时抛出 ValidationError，且不在数据库中
+    留下任何记录。学员编号独立于课程编号递增。
+    """
+    name = (name or "").strip()
+    if not name:
+        raise ValidationError(ERR_EMPTY_LEARNER_NAME)
+    with conn:
+        cursor = conn.execute("INSERT INTO learners (name) VALUES (?)", (name,))
+        learner_id = cursor.lastrowid
+    return learner_id
+
+
+def get_learner(conn, learner_id):
+    """按编号查询学员，返回 {"learner_id", "name"}；不存在时返回 None。
+
+    超出 SQLite 整数范围的编号不可能对应任何学员，直接返回 None，
+    避免把 OverflowError 暴露给调用方。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return None
+    row = conn.execute(
+        "SELECT name FROM learners WHERE id = ?", (learner_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return {"learner_id": learner_id, "name": row[0]}
