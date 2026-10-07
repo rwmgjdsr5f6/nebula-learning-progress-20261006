@@ -12,6 +12,7 @@ ERR_LAST_CHAPTER = "课程至少保留一个章节"
 ERR_NOT_FOUND = "课程不存在"
 ERR_BAD_ID = "课程编号必须为正整数"
 ERR_EMPTY_LEARNER_NAME = "学员姓名不能为空"
+ERR_EMPTY_LEARNER_NAME_FILTER = "学员姓名筛选词不能为空"
 ERR_LEARNER_NOT_FOUND = "学员不存在"
 ERR_BAD_LEARNER_ID = "学员编号必须为正整数"
 
@@ -570,12 +571,20 @@ def list_learner_courses(conn, learner_id):
     )
 
 
-def list_course_learners(conn, course_id):
+def list_course_learners(conn, course_id, name_contains=None):
     """查询一门课程的报名名册，按学员编号升序返回；课程不存在返回 None。
 
     每项为 {"learner_id", "name"}，姓名使用数据库中当前保存的值；只列
     已报名学员，课程存在但无人报名时返回空列表。超出 SQLite 整数范围的
     编号按不存在处理。查询为只读操作，不修改任何记录。
+
+    name_contains 省略或为 None 时返回全部已报名学员；否则筛选词先去除
+    首尾空白（保留内部空白与大小写），再与学员当前保存的完整姓名做大小写
+    敏感的连续子串匹配，只在该课程已报名学员中筛选，不匹配其他课程或未
+    报名学员，百分号、下划线、引号等字符一律按普通字符处理。课程存在且
+    显式传入空字符串或仅含空白的筛选词时抛出
+    ValidationError(ERR_EMPTY_LEARNER_NAME_FILTER)；课程不存在时即使
+    筛选词为空也返回 None，不抛出 ValidationError。
     """
     if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
         return None
@@ -584,6 +593,10 @@ def list_course_learners(conn, course_id):
     ).fetchone()
     if row is None:
         return None
+    if name_contains is not None:
+        name_contains = name_contains.strip()
+        if not name_contains:
+            raise ValidationError(ERR_EMPTY_LEARNER_NAME_FILTER)
     rows = conn.execute(
         """
         SELECT l.id, l.name
@@ -594,7 +607,13 @@ def list_course_learners(conn, course_id):
         """,
         (course_id,),
     )
-    return [
+    learners = [
         {"learner_id": learner_id, "name": name}
         for learner_id, name in rows
     ]
+    if name_contains is not None:
+        learners = [
+            learner for learner in learners
+            if name_contains in learner["name"]
+        ]
+    return learners
