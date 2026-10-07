@@ -489,6 +489,29 @@ def get_learner(conn, learner_id):
     return {"learner_id": learner_id, "name": row[0]}
 
 
+def _enrollment_target_exists(conn, learner_id, course_id):
+    """判定报名关系的目标（学员、课程）是否有效，是则返回 True。
+
+    报名与取消报名共用这一套目标校验，集中在此一处维护：任一编号超出
+    SQLite 有符号 64 位整数范围（不可能存在于库中），或学员、课程任一
+    不存在时，目标无效。本函数只读不写；调用方在确认目标有效后再执行
+    各自的写入。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return False
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+    ).fetchone()
+    if row is None:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+    ).fetchone()
+    return row is not None
+
+
 def enroll_learner(conn, learner_id, course_id):
     """登记学员与课程的报名关系，返回 {"learner_id", "course_id"}；
     学员或课程不存在时返回 None，且不写入任何记录。
@@ -497,20 +520,8 @@ def enroll_learner(conn, learner_id, course_id):
     报名仍成功并返回相同内容，名册中只保留一条记录。超出 SQLite 整数
     范围的编号按不存在处理。仅记录报名关系，不产生学习进度或结业结果。
     """
-    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
-        return None
-    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
-        return None
     with conn:
-        row = conn.execute(
-            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        row = conn.execute(
-            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-        ).fetchone()
-        if row is None:
+        if not _enrollment_target_exists(conn, learner_id, course_id):
             return None
         conn.execute(
             "INSERT OR IGNORE INTO enrollments (learner_id, course_id)"
@@ -528,20 +539,8 @@ def unenroll_learner(conn, learner_id, course_id):
     组合的关系，课程、学员及其他报名关系不变。超出 SQLite 整数范围的
     编号按不存在处理。不产生学习进度或结业结果。
     """
-    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
-        return None
-    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
-        return None
     with conn:
-        row = conn.execute(
-            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
-        ).fetchone()
-        if row is None:
-            return None
-        row = conn.execute(
-            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-        ).fetchone()
-        if row is None:
+        if not _enrollment_target_exists(conn, learner_id, course_id):
             return None
         conn.execute(
             "DELETE FROM enrollments WHERE learner_id = ? AND course_id = ?",
