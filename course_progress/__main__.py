@@ -168,6 +168,10 @@ def build_parser():
         "--db", default=argparse.SUPPRESS, help="同全局 --db"
     )
     list_course_learners_parser.add_argument("course_id", help="课程编号（正整数）")
+    list_course_learners_parser.add_argument(
+        "--name-contains",
+        help="按学员姓名片段筛选：去除首尾空白后做大小写敏感的连续子串匹配",
+    )
 
     list_learner_courses_parser = subparsers.add_parser(
         "list-learner-courses", help="查询一个学员已报名的课程"
@@ -276,7 +280,13 @@ def main(argv=None):
             if course_id is None:
                 print(ERR_BAD_ID, file=sys.stderr)
                 return 2
-            learners = list_course_learners(conn, course_id)
+            try:
+                learners = list_course_learners(
+                    conn, course_id, getattr(args, "name_contains", None)
+                )
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             if learners is None:
                 print(ERR_NOT_FOUND, file=sys.stderr)
                 return 1
