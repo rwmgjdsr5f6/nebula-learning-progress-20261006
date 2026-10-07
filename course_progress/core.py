@@ -259,6 +259,62 @@ def rename_chapter(conn, course_id, chapter, name):
     return get_course(conn, course_id)
 
 
+def _load_existing_chapters(conn, course_id):
+    """读取课程的现有章节，按 position 升序返回 (position, name) 列表。
+
+    课程不存在时返回 None，调用方据此对外返回 None；编号范围检查由调用
+    方在进入事务前完成。章节重排与删除两条路径都要先确认课程存在、再按
+    相同方式取得有序章节，课程存在性与章节读取规则集中在此维护。
+    """
+    row = conn.execute(
+        "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return [
+        (position, name)
+        for position, name in conn.execute(
+            "SELECT position, name FROM chapters WHERE course_id = ?"
+            " ORDER BY position",
+            (course_id,),
+        )
+    ]
+
+
+def _save_chapter_order(conn, course_id, existing, names, drop_position=None):
+    """按 names 给定的名称顺序把章节落位为从 0 开始的连续 position。
+
+    existing 为操作前该课程的 (position, name) 列表；names 为目标顺序的
+    章节名，须是 existing 名称的无重复子集，全部内容校验由调用方在调用
+    前完成——重排时 names 与现有章节完整对应，删除时为去掉目标章节后的
+    剩余章节，其余章节相对顺序不变。drop_position 给出操作前坐标下要
+    删除的章节位置（仅删除路径传入）。
+
+    章节顺序保存规则集中在此维护，重排与删除两条路径共用同一套写入：
+    先把全部现有 position 整体平移章节总数，避开 (course_id, position)
+    主键冲突；删除路径随即删掉平移后的目标章节；再按目标顺序逐章以名称
+    定位落位到 0 起的连续位置。调用方须在事务中调用，任一步骤失败时
+    整体回滚，不留下部分落位状态。
+    """
+    shift = len(existing)
+    # 先整体平移 position 避开主键冲突，再按目标顺序落位
+    conn.execute(
+        "UPDATE chapters SET position = position + ? WHERE course_id = ?",
+        (shift, course_id),
+    )
+    if drop_position is not None:
+        conn.execute(
+            "DELETE FROM chapters WHERE course_id = ? AND position = ?",
+            (course_id, drop_position + shift),
+        )
+    for position, name in enumerate(names):
+        conn.execute(
+            "UPDATE chapters SET position = ?"
+            " WHERE course_id = ? AND name = ?",
+            (position, course_id, name),
+        )
+
+
 def reorder_chapters(conn, course_id, chapters):
     """重排已有课程的全部章节，返回与 get_course 同结构的课程详情；
     课程不存在返回 None。
@@ -277,36 +333,17 @@ def reorder_chapters(conn, course_id, chapters):
         return None
     names = [name.strip() for name in chapters]
     with conn:
-        row = conn.execute(
-            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-        ).fetchone()
-        if row is None:
+        existing = _load_existing_chapters(conn, course_id)
+        if existing is None:
             return None
         if not names or any(not name for name in names):
             raise ValidationError(ERR_EMPTY_CHAPTER)
         if len(set(names)) != len(names):
             raise ValidationError(ERR_DUP_CHAPTER)
-        existing = [
-            r[0]
-            for r in conn.execute(
-                "SELECT name FROM chapters WHERE course_id = ?"
-                " ORDER BY position",
-                (course_id,),
-            )
-        ]
-        if set(names) != set(existing):
+        existing_names = [name for position, name in existing]
+        if set(names) != set(existing_names):
             raise ValidationError(ERR_CHAPTER_LIST_MISMATCH)
-        # 先整体平移 position 避开主键冲突，再按新顺序落位
-        conn.execute(
-            "UPDATE chapters SET position = position + ? WHERE course_id = ?",
-            (len(existing), course_id),
-        )
-        for position, name in enumerate(names):
-            conn.execute(
-                "UPDATE chapters SET position = ?"
-                " WHERE course_id = ? AND name = ?",
-                (position, course_id, name),
-            )
+        _save_chapter_order(conn, course_id, existing, names)
     return get_course(conn, course_id)
 
 
@@ -327,21 +364,11 @@ def remove_chapter(conn, course_id, chapter):
         return None
     chapter = (chapter or "").strip()
     with conn:
-        row = conn.execute(
-            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
-        ).fetchone()
-        if row is None:
+        existing = _load_existing_chapters(conn, course_id)
+        if existing is None:
             return None
         if not chapter:
             raise ValidationError(ERR_EMPTY_CHAPTER)
-        existing = [
-            (position, chapter_name)
-            for position, chapter_name in conn.execute(
-                "SELECT position, name FROM chapters WHERE course_id = ?"
-                " ORDER BY position",
-                (course_id,),
-            )
-        ]
         target_position = next(
             (
                 position
@@ -359,21 +386,13 @@ def remove_chapter(conn, course_id, chapter):
             for position, chapter_name in existing
             if position != target_position
         ]
-        # 先整体平移 position 避开主键冲突，再删掉目标章节并按剩余顺序落位
-        conn.execute(
-            "UPDATE chapters SET position = position + ? WHERE course_id = ?",
-            (len(existing), course_id),
+        _save_chapter_order(
+            conn,
+            course_id,
+            existing,
+            remaining,
+            drop_position=target_position,
         )
-        conn.execute(
-            "DELETE FROM chapters WHERE course_id = ? AND position = ?",
-            (course_id, target_position + len(existing)),
-        )
-        for position, name in enumerate(remaining):
-            conn.execute(
-                "UPDATE chapters SET position = ?"
-                " WHERE course_id = ? AND name = ?",
-                (position, course_id, name),
-            )
     return get_course(conn, course_id)
 
 
