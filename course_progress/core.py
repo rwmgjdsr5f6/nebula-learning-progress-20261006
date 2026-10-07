@@ -413,6 +413,20 @@ def rename_learner(conn, learner_id, name):
     return {"learner_id": learner_id, "name": name}
 
 
+def list_learners(conn):
+    """查询全部学员名册，按学员编号升序返回。
+
+    每项为 {"learner_id", "name"}，姓名使用数据库中已保存的值（保留内部
+    空白与大小写）；同名学员分别返回。数据库中没有学员时返回空列表。
+    查询为只读操作，不修改任何记录。
+    """
+    rows = conn.execute("SELECT id, name FROM learners ORDER BY id")
+    return [
+        {"learner_id": learner_id, "name": name}
+        for learner_id, name in rows
+    ]
+
+
 def get_learner(conn, learner_id):
     """按编号查询学员，返回 {"learner_id", "name"}；不存在时返回 None。
 
