@@ -78,6 +78,43 @@ def add_course(conn, title, chapters):
     return course_id
 
 
+def _course_overviews(conn, learner_id=None):
+    """读取课程概览（编号、标题、章节数），按课程编号升序返回。
+
+    每项为 {"course_id", "title", "chapter_count"}，标题与章节数取当前
+    保存值。learner_id 为 None 时覆盖全部课程；否则只含该学员已报名
+    的课程，报名关系仅用于限定范围：同一课程至多出现一次，其他学员
+    的报名不影响章节数统计。
+    """
+    if learner_id is None:
+        rows = conn.execute(
+            """
+            SELECT c.id, c.title, COUNT(ch.position)
+            FROM courses AS c
+            LEFT JOIN chapters AS ch ON ch.course_id = c.id
+            GROUP BY c.id
+            ORDER BY c.id
+            """
+        )
+    else:
+        rows = conn.execute(
+            """
+            SELECT c.id, c.title, COUNT(ch.position)
+            FROM enrollments AS e
+            JOIN courses AS c ON c.id = e.course_id
+            LEFT JOIN chapters AS ch ON ch.course_id = c.id
+            WHERE e.learner_id = ?
+            GROUP BY c.id
+            ORDER BY c.id
+            """,
+            (learner_id,),
+        )
+    return [
+        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
+        for course_id, title, chapter_count in rows
+    ]
+
+
 def list_courses(conn, title_contains=None):
     """查询全部课程概览，按课程编号升序返回。
 
@@ -95,19 +132,7 @@ def list_courses(conn, title_contains=None):
         title_contains = title_contains.strip()
         if not title_contains:
             raise ValidationError(ERR_EMPTY_TITLE_FILTER)
-    rows = conn.execute(
-        """
-        SELECT c.id, c.title, COUNT(ch.position)
-        FROM courses AS c
-        LEFT JOIN chapters AS ch ON ch.course_id = c.id
-        GROUP BY c.id
-        ORDER BY c.id
-        """
-    )
-    courses = [
-        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
-        for course_id, title, chapter_count in rows
-    ]
+    courses = _course_overviews(conn)
     if title_contains is not None:
         courses = [
             course for course in courses if title_contains in course["title"]
@@ -525,22 +550,7 @@ def list_learner_courses(conn, learner_id):
     ).fetchone()
     if row is None:
         return None
-    rows = conn.execute(
-        """
-        SELECT c.id, c.title, COUNT(ch.position)
-        FROM enrollments AS e
-        JOIN courses AS c ON c.id = e.course_id
-        LEFT JOIN chapters AS ch ON ch.course_id = c.id
-        WHERE e.learner_id = ?
-        GROUP BY c.id
-        ORDER BY c.id
-        """,
-        (learner_id,),
-    )
-    return [
-        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
-        for course_id, title, chapter_count in rows
-    ]
+    return _course_overviews(conn, learner_id)
 
 
 def list_course_learners(conn, course_id):
