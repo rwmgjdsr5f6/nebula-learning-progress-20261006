@@ -8,12 +8,16 @@ import sys
 
 from .core import (
     ERR_BAD_ID,
+    ERR_BAD_LEARNER_ID,
+    ERR_LEARNER_NOT_FOUND,
     ERR_NOT_FOUND,
     ValidationError,
     add_course,
+    add_learner,
     append_chapter,
     connect,
     get_course,
+    get_learner,
     list_courses,
     remove_chapter,
     rename_chapter,
@@ -99,6 +103,20 @@ def build_parser():
         "--title-contains",
         help="按课程标题片段筛选：去除首尾空白后做大小写敏感的连续子串匹配",
     )
+
+    add_learner_parser = subparsers.add_parser("add-learner", help="登记一个学员")
+    add_learner_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+    add_learner_parser.add_argument("--name", help="学员姓名")
+
+    get_learner_parser = subparsers.add_parser(
+        "get-learner", help="按编号查询学员"
+    )
+    get_learner_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+    get_learner_parser.add_argument("learner_id", help="学员编号（正整数）")
     return parser
 
 
@@ -144,6 +162,25 @@ def main(argv=None):
                     {"courses": courses}, ensure_ascii=False
                 )
             )
+            return 0
+        if args.command == "add-learner":
+            try:
+                learner_id = add_learner(conn, args.name or "")
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            print(json.dumps({"learner_id": learner_id}, ensure_ascii=False))
+            return 0
+        if args.command == "get-learner":
+            learner_id = parse_positive_int(args.learner_id)
+            if learner_id is None:
+                print(ERR_BAD_LEARNER_ID, file=sys.stderr)
+                return 2
+            learner = get_learner(conn, learner_id)
+            if learner is None:
+                print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(json.dumps(learner, ensure_ascii=False))
             return 0
         course_id = parse_positive_int(args.course_id)
         if course_id is None:

@@ -2,28 +2,38 @@
 
 from .core import (
     ERR_BAD_ID,
+    ERR_BAD_LEARNER_ID,
     ERR_DUP_CHAPTER,
     ERR_EMPTY_CHAPTER,
+    ERR_EMPTY_LEARNER_NAME,
     ERR_EMPTY_TITLE,
     ERR_EMPTY_TITLE_FILTER,
+    ERR_LEARNER_NOT_FOUND,
     ERR_NOT_FOUND,
     add_course,
+    add_learner,
     connect,
     get_course,
+    get_learner,
     list_courses,
     rename_course,
 )
 
 __all__ = [
     "ERR_BAD_ID",
+    "ERR_BAD_LEARNER_ID",
     "ERR_DUP_CHAPTER",
     "ERR_EMPTY_CHAPTER",
+    "ERR_EMPTY_LEARNER_NAME",
     "ERR_EMPTY_TITLE",
     "ERR_EMPTY_TITLE_FILTER",
+    "ERR_LEARNER_NOT_FOUND",
     "ERR_NOT_FOUND",
     "add_course",
+    "add_learner",
     "connect",
     "get_course",
+    "get_learner",
     "list_courses",
     "rename_course",
 ]
