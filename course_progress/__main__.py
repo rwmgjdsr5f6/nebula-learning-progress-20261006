@@ -16,8 +16,10 @@ from .core import (
     add_learner,
     append_chapter,
     connect,
+    enroll_learner,
     get_course,
     get_learner,
+    list_course_learners,
     list_courses,
     list_learners,
     remove_chapter,
@@ -135,6 +137,21 @@ def build_parser():
     list_learners_parser.add_argument(
         "--db", default=argparse.SUPPRESS, help="同全局 --db"
     )
+
+    enroll = subparsers.add_parser(
+        "enroll-learner", help="为一个学员报名一门课程"
+    )
+    enroll.add_argument("--db", default=argparse.SUPPRESS, help="同全局 --db")
+    enroll.add_argument("learner_id", help="学员编号（正整数）")
+    enroll.add_argument("--course", required=True, help="课程编号（正整数）")
+
+    list_course_learners_parser = subparsers.add_parser(
+        "list-course-learners", help="查询一门课程的报名名册"
+    )
+    list_course_learners_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+    list_course_learners_parser.add_argument("course_id", help="课程编号（正整数）")
     return parser
 
 
@@ -192,6 +209,40 @@ def main(argv=None):
         if args.command == "list-learners":
             learners = list_learners(conn)
             print(json.dumps({"learners": learners}, ensure_ascii=False))
+            return 0
+        if args.command == "enroll-learner":
+            learner_id = parse_positive_int(args.learner_id)
+            if learner_id is None:
+                print(ERR_BAD_LEARNER_ID, file=sys.stderr)
+                return 2
+            course_id = parse_positive_int(args.course)
+            if course_id is None:
+                print(ERR_BAD_ID, file=sys.stderr)
+                return 2
+            if get_learner(conn, learner_id) is None:
+                print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
+                return 1
+            if get_course(conn, course_id) is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            enrolled = enroll_learner(conn, learner_id, course_id)
+            print(json.dumps(enrolled, ensure_ascii=False))
+            return 0
+        if args.command == "list-course-learners":
+            course_id = parse_positive_int(args.course_id)
+            if course_id is None:
+                print(ERR_BAD_ID, file=sys.stderr)
+                return 2
+            learners = list_course_learners(conn, course_id)
+            if learners is None:
+                print(ERR_NOT_FOUND, file=sys.stderr)
+                return 1
+            print(
+                json.dumps(
+                    {"course_id": course_id, "learners": learners},
+                    ensure_ascii=False,
+                )
+            )
             return 0
         if args.command == "get-learner":
             learner_id = parse_positive_int(args.learner_id)

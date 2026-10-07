@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS learners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS enrollments (
+    learner_id INTEGER NOT NULL REFERENCES learners (id),
+    course_id INTEGER NOT NULL REFERENCES courses (id),
+    PRIMARY KEY (learner_id, course_id)
+);
 """
 
 
@@ -441,3 +446,64 @@ def get_learner(conn, learner_id):
     if row is None:
         return None
     return {"learner_id": learner_id, "name": row[0]}
+
+
+def enroll_learner(conn, learner_id, course_id):
+    """登记学员与课程的报名关系，返回 {"learner_id", "course_id"}；
+    学员或课程不存在时返回 None，且不写入任何记录。
+
+    一个学员可报名多门课程，一门课程可接收多个学员；同一编号组合重复
+    报名仍成功并返回相同内容，名册中只保留一条记录。超出 SQLite 整数
+    范围的编号按不存在处理。仅记录报名关系，不产生学习进度或结业结果。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return None
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    with conn:
+        row = conn.execute(
+            "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        row = conn.execute(
+            "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute(
+            "INSERT OR IGNORE INTO enrollments (learner_id, course_id)"
+            " VALUES (?, ?)",
+            (learner_id, course_id),
+        )
+    return {"learner_id": learner_id, "course_id": course_id}
+
+
+def list_course_learners(conn, course_id):
+    """查询一门课程的报名名册，按学员编号升序返回；课程不存在返回 None。
+
+    每项为 {"learner_id", "name"}，姓名使用数据库中当前保存的值；只列
+    已报名学员，课程存在但无人报名时返回空列表。超出 SQLite 整数范围的
+    编号按不存在处理。查询为只读操作，不修改任何记录。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    row = conn.execute(
+        "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    rows = conn.execute(
+        """
+        SELECT l.id, l.name
+        FROM enrollments AS e
+        JOIN learners AS l ON l.id = e.learner_id
+        WHERE e.course_id = ?
+        ORDER BY l.id
+        """,
+        (course_id,),
+    )
+    return [
+        {"learner_id": learner_id, "name": name}
+        for learner_id, name in rows
+    ]
