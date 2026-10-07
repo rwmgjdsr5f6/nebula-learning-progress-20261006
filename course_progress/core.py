@@ -507,3 +507,36 @@ def list_course_learners(conn, course_id):
         {"learner_id": learner_id, "name": name}
         for learner_id, name in rows
     ]
+
+
+def list_learner_courses(conn, learner_id):
+    """查询一个学员已报名的课程，按课程编号升序返回；学员不存在返回 None。
+
+    每项为 {"course_id", "title", "chapter_count"}，标题与章节数使用课程
+    当前保存的值，不含章节名称或学习完成状态；只列实际报名的课程，重复
+    报名不产生重复项，学员存在但尚未报名时返回空列表。超出 SQLite 整数
+    范围的编号按不存在处理。查询为只读操作，不修改任何记录。
+    """
+    if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+        return None
+    row = conn.execute(
+        "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    rows = conn.execute(
+        """
+        SELECT c.id, c.title, COUNT(ch.position)
+        FROM enrollments AS e
+        JOIN courses AS c ON c.id = e.course_id
+        LEFT JOIN chapters AS ch ON ch.course_id = c.id
+        WHERE e.learner_id = ?
+        GROUP BY c.id
+        ORDER BY c.id
+        """,
+        (learner_id,),
+    )
+    return [
+        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
+        for course_id, title, chapter_count in rows
+    ]
