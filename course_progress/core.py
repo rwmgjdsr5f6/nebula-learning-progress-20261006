@@ -259,6 +259,40 @@ def rename_chapter(conn, course_id, chapter, name):
     return get_course(conn, course_id)
 
 
+def _save_chapter_order(conn, course_id, chapter_count, ordered_names,
+                        delete_position=None):
+    """在调用方已开启的事务内保存课程章节的最终顺序（重排与删除共用）。
+
+    两条写路径的落位规则完全相同，集中在此一处维护：先把该课程全部章节
+    的 position 整体上移 chapter_count，避开 (course_id, position) 主键
+    冲突；若给出 delete_position，则删掉平移到
+    delete_position + chapter_count 的目标行（删除章节路径；重排路径不传，
+    全部章节都参与落位）；随后按 ordered_names 从 0 开始逐章落位，落位后
+    position 重新连续。
+
+    chapter_count 为操作前的章节数（即平移量），ordered_names 为操作后
+    保留章节按目标顺序排列的名称。调用方须先完成全部输入校验：本函数不做
+    任何校验，也不自行开启或提交事务；写入中途的约束失败原样抛出
+    sqlite3.IntegrityError，由调用方所在的事务整体回滚。
+    """
+    # 先整体平移 position 避开主键冲突，再按需删除目标章节并按新顺序落位
+    conn.execute(
+        "UPDATE chapters SET position = position + ? WHERE course_id = ?",
+        (chapter_count, course_id),
+    )
+    if delete_position is not None:
+        conn.execute(
+            "DELETE FROM chapters WHERE course_id = ? AND position = ?",
+            (course_id, delete_position + chapter_count),
+        )
+    for position, name in enumerate(ordered_names):
+        conn.execute(
+            "UPDATE chapters SET position = ?"
+            " WHERE course_id = ? AND name = ?",
+            (position, course_id, name),
+        )
+
+
 def reorder_chapters(conn, course_id, chapters):
     """重排已有课程的全部章节，返回与 get_course 同结构的课程详情；
     课程不存在返回 None。
@@ -296,17 +330,7 @@ def reorder_chapters(conn, course_id, chapters):
         ]
         if set(names) != set(existing):
             raise ValidationError(ERR_CHAPTER_LIST_MISMATCH)
-        # 先整体平移 position 避开主键冲突，再按新顺序落位
-        conn.execute(
-            "UPDATE chapters SET position = position + ? WHERE course_id = ?",
-            (len(existing), course_id),
-        )
-        for position, name in enumerate(names):
-            conn.execute(
-                "UPDATE chapters SET position = ?"
-                " WHERE course_id = ? AND name = ?",
-                (position, course_id, name),
-            )
+        _save_chapter_order(conn, course_id, len(existing), names)
     return get_course(conn, course_id)
 
 
@@ -359,21 +383,13 @@ def remove_chapter(conn, course_id, chapter):
             for position, chapter_name in existing
             if position != target_position
         ]
-        # 先整体平移 position 避开主键冲突，再删掉目标章节并按剩余顺序落位
-        conn.execute(
-            "UPDATE chapters SET position = position + ? WHERE course_id = ?",
-            (len(existing), course_id),
+        _save_chapter_order(
+            conn,
+            course_id,
+            len(existing),
+            remaining,
+            delete_position=target_position,
         )
-        conn.execute(
-            "DELETE FROM chapters WHERE course_id = ? AND position = ?",
-            (course_id, target_position + len(existing)),
-        )
-        for position, name in enumerate(remaining):
-            conn.execute(
-                "UPDATE chapters SET position = ?"
-                " WHERE course_id = ? AND name = ?",
-                (position, course_id, name),
-            )
     return get_course(conn, course_id)
 
 
