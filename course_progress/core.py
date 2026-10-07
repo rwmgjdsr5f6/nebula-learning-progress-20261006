@@ -46,6 +46,42 @@ class ValidationError(Exception):
 _SQLITE_INT64_MIN = -(2**63)
 _SQLITE_INT64_MAX = 2**63 - 1
 
+# 概览读取的共有规则：只取课程编号、标题与章节数（LEFT JOIN 保证没有
+# 章节的课程章节数为 0），按课程编号聚合去重并升序排列。两种概览查询
+# 的差异仅在课程范围（FROM/WHERE 子句）。
+_ALL_COURSES_SCOPE = """
+FROM courses AS c
+LEFT JOIN chapters AS ch ON ch.course_id = c.id
+"""
+_LEARNER_COURSES_SCOPE = """
+FROM enrollments AS e
+JOIN courses AS c ON c.id = e.course_id
+LEFT JOIN chapters AS ch ON ch.course_id = c.id
+WHERE e.learner_id = ?
+"""
+
+
+def _list_course_overviews(conn, scope_sql, params=()):
+    """按给定课程范围读取概览，每项整理为 course_id/title/chapter_count。
+
+    scope_sql 提供 FROM/WHERE 部分，且都以课程表别名 c 关联章节表别名 ch；
+    编号、标题、章节数的读取与结果整理在此集中维护，保证全部课程概览与
+    学员课程概览始终一致。
+    """
+    rows = conn.execute(
+        f"""
+        SELECT c.id, c.title, COUNT(ch.position)
+        {scope_sql}
+        GROUP BY c.id
+        ORDER BY c.id
+        """,
+        params,
+    )
+    return [
+        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
+        for course_id, title, chapter_count in rows
+    ]
+
 
 def connect(db_path):
     """打开（必要时创建）数据库并确保表结构存在。父目录需已存在。"""
@@ -95,19 +131,7 @@ def list_courses(conn, title_contains=None):
         title_contains = title_contains.strip()
         if not title_contains:
             raise ValidationError(ERR_EMPTY_TITLE_FILTER)
-    rows = conn.execute(
-        """
-        SELECT c.id, c.title, COUNT(ch.position)
-        FROM courses AS c
-        LEFT JOIN chapters AS ch ON ch.course_id = c.id
-        GROUP BY c.id
-        ORDER BY c.id
-        """
-    )
-    courses = [
-        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
-        for course_id, title, chapter_count in rows
-    ]
+    courses = _list_course_overviews(conn, _ALL_COURSES_SCOPE)
     if title_contains is not None:
         courses = [
             course for course in courses if title_contains in course["title"]
@@ -525,22 +549,9 @@ def list_learner_courses(conn, learner_id):
     ).fetchone()
     if row is None:
         return None
-    rows = conn.execute(
-        """
-        SELECT c.id, c.title, COUNT(ch.position)
-        FROM enrollments AS e
-        JOIN courses AS c ON c.id = e.course_id
-        LEFT JOIN chapters AS ch ON ch.course_id = c.id
-        WHERE e.learner_id = ?
-        GROUP BY c.id
-        ORDER BY c.id
-        """,
-        (learner_id,),
+    return _list_course_overviews(
+        conn, _LEARNER_COURSES_SCOPE, (learner_id,)
     )
-    return [
-        {"course_id": course_id, "title": title, "chapter_count": chapter_count}
-        for course_id, title, chapter_count in rows
-    ]
 
 
 def list_course_learners(conn, course_id):
