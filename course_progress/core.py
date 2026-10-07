@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS learners (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS enrollments (
+    learner_id INTEGER NOT NULL REFERENCES learners (id),
+    course_id INTEGER NOT NULL REFERENCES courses (id),
+    PRIMARY KEY (learner_id, course_id)
+);
 """
 
 
@@ -441,3 +446,63 @@ def get_learner(conn, learner_id):
     if row is None:
         return None
     return {"learner_id": learner_id, "name": row[0]}
+
+
+def enroll_learner(conn, learner_id, course_id):
+    """登记学员对课程的报名，返回 {"learner_id", "course_id"}。
+
+    按学员存在性、课程存在性的顺序判定：学员编号不存在时抛出
+    ValidationError(ERR_LEARNER_NOT_FOUND)，学员存在但课程编号不存在时
+    抛出 ValidationError(ERR_NOT_FOUND)；超出 SQLite 整数范围的编号按
+    不存在处理。同一学员可报名多门课程，同一课程可接收多名学员；同一
+    编号组合重复报名仍成功并返回相同内容，名册中只记录一次。报名不
+    产生学习进度或结业结果，校验失败时不新增任何报名记录。
+    """
+    with conn:
+        learner = None
+        if _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
+            learner = conn.execute(
+                "SELECT 1 FROM learners WHERE id = ?", (learner_id,)
+            ).fetchone()
+        if learner is None:
+            raise ValidationError(ERR_LEARNER_NOT_FOUND)
+        course = None
+        if _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+            course = conn.execute(
+                "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+            ).fetchone()
+        if course is None:
+            raise ValidationError(ERR_NOT_FOUND)
+        conn.execute(
+            "INSERT OR IGNORE INTO enrollments (learner_id, course_id)"
+            " VALUES (?, ?)",
+            (learner_id, course_id),
+        )
+    return {"learner_id": learner_id, "course_id": course_id}
+
+
+def list_course_learners(conn, course_id):
+    """查询课程报名名册，返回 {"course_id", "learners"}；课程不存在返回 None。
+
+    learners 按学员编号升序，只列已报名学员，每项为 {"learner_id", "name"}，
+    姓名使用当前保存的值（改名后显示新姓名）。课程存在但无人报名时返回
+    该编号和空数组。超出 SQLite 整数范围的编号按不存在处理。查询为只读
+    操作，不修改任何记录。
+    """
+    if not _SQLITE_INT64_MIN <= course_id <= _SQLITE_INT64_MAX:
+        return None
+    row = conn.execute(
+        "SELECT 1 FROM courses WHERE id = ?", (course_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    learners = [
+        {"learner_id": learner_id, "name": name}
+        for learner_id, name in conn.execute(
+            "SELECT l.id, l.name FROM enrollments AS e"
+            " JOIN learners AS l ON l.id = e.learner_id"
+            " WHERE e.course_id = ? ORDER BY l.id",
+            (course_id,),
+        )
+    ]
+    return {"course_id": course_id, "learners": learners}
