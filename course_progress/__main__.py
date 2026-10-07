@@ -19,6 +19,7 @@ from .core import (
     get_course,
     get_learner,
     list_courses,
+    list_learners,
     remove_chapter,
     rename_chapter,
     rename_course,
@@ -119,6 +120,13 @@ def build_parser():
     )
     get_learner_parser.add_argument("learner_id", help="学员编号（正整数）")
 
+    list_learners_parser = subparsers.add_parser(
+        "list-learners", help="查询全部已登记学员的名册"
+    )
+    list_learners_parser.add_argument(
+        "--db", default=argparse.SUPPRESS, help="同全局 --db"
+    )
+
     rename_learner_parser = subparsers.add_parser(
         "rename-learner", help="按编号修改学员姓名（编号不变）"
     )
@@ -180,6 +188,14 @@ def main(argv=None):
                 print(str(exc), file=sys.stderr)
                 return 1
             print(json.dumps({"learner_id": learner_id}, ensure_ascii=False))
+            return 0
+        if args.command == "list-learners":
+            learners = list_learners(conn)
+            print(
+                json.dumps(
+                    {"learners": learners}, ensure_ascii=False
+                )
+            )
             return 0
         if args.command == "get-learner":
             learner_id = parse_positive_int(args.learner_id)
