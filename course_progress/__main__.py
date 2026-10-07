@@ -33,6 +33,13 @@ from .core import (
 
 _ID_PATTERN = re.compile(r"[+-]?\d+")
 
+# 报名关系命令共用的存储函数：两个命令的参数解析与校验流程完全一致，
+# 仅最终调用的存储操作不同。
+_ENROLLMENT_ACTIONS = {
+    "enroll-learner": enroll_learner,
+    "unenroll-learner": unenroll_learner,
+}
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -183,6 +190,30 @@ def parse_positive_int(raw):
     return value if value > 0 else None
 
 
+def resolve_enrollment_target(conn, learner_raw, course_raw):
+    """报名关系命令的共用校验流程。
+
+    按学员编号格式、课程编号格式、学员存在性、课程存在性的顺序检查，
+    全部通过时返回 ((learner_id, course_id), 0)；任一环节失败时向标准
+    错误打印首个错误消息，并返回 (None, 对应退出码)，不修改任何记录。
+    """
+    learner_id = parse_positive_int(learner_raw)
+    if learner_id is None:
+        print(ERR_BAD_LEARNER_ID, file=sys.stderr)
+        return None, 2
+    course_id = parse_positive_int(course_raw)
+    if course_id is None:
+        print(ERR_BAD_ID, file=sys.stderr)
+        return None, 2
+    if get_learner(conn, learner_id) is None:
+        print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
+        return None, 1
+    if get_course(conn, course_id) is None:
+        print(ERR_NOT_FOUND, file=sys.stderr)
+        return None, 1
+    return (learner_id, course_id), 0
+
+
 def main(argv=None):
     args = build_parser().parse_args(argv)
     db_path = getattr(args, "db", None)
@@ -229,41 +260,16 @@ def main(argv=None):
             learners = list_learners(conn)
             print(json.dumps({"learners": learners}, ensure_ascii=False))
             return 0
-        if args.command == "enroll-learner":
-            learner_id = parse_positive_int(args.learner_id)
-            if learner_id is None:
-                print(ERR_BAD_LEARNER_ID, file=sys.stderr)
-                return 2
-            course_id = parse_positive_int(args.course)
-            if course_id is None:
-                print(ERR_BAD_ID, file=sys.stderr)
-                return 2
-            if get_learner(conn, learner_id) is None:
-                print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
-                return 1
-            if get_course(conn, course_id) is None:
-                print(ERR_NOT_FOUND, file=sys.stderr)
-                return 1
-            enrolled = enroll_learner(conn, learner_id, course_id)
-            print(json.dumps(enrolled, ensure_ascii=False))
-            return 0
-        if args.command == "unenroll-learner":
-            learner_id = parse_positive_int(args.learner_id)
-            if learner_id is None:
-                print(ERR_BAD_LEARNER_ID, file=sys.stderr)
-                return 2
-            course_id = parse_positive_int(args.course)
-            if course_id is None:
-                print(ERR_BAD_ID, file=sys.stderr)
-                return 2
-            if get_learner(conn, learner_id) is None:
-                print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
-                return 1
-            if get_course(conn, course_id) is None:
-                print(ERR_NOT_FOUND, file=sys.stderr)
-                return 1
-            unenrolled = unenroll_learner(conn, learner_id, course_id)
-            print(json.dumps(unenrolled, ensure_ascii=False))
+        if args.command in _ENROLLMENT_ACTIONS:
+            target, exit_code = resolve_enrollment_target(
+                conn, args.learner_id, args.course
+            )
+            if target is None:
+                return exit_code
+            learner_id, course_id = target
+            action = _ENROLLMENT_ACTIONS[args.command]
+            result = action(conn, learner_id, course_id)
+            print(json.dumps(result, ensure_ascii=False))
             return 0
         if args.command == "list-course-learners":
             course_id = parse_positive_int(args.course_id)
