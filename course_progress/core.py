@@ -84,6 +84,27 @@ def _list_course_overviews(conn, scope_sql, params=()):
     ]
 
 
+def _filter_courses_by_title(courses, title_contains):
+    """在概览列表上按标题片段筛选（两种概览查询共用）。
+
+    title_contains 为 None 时不筛选，原样返回 courses；否则筛选词先去除
+    首尾空白（保留内部空白与大小写），去空白后为空时抛出
+    ValidationError(ERR_EMPTY_TITLE_FILTER)，再对课程当前保存的标题做大小
+    写敏感的连续子串匹配：直接使用 Python 的 ``in`` 运算，百分号、下划线、
+    引号等字符一律按普通字符处理，不引入任何 SQL 通配语义；只比对标题，
+    章节名称不参与。调用方须先完成各自的范围限定与存在性判定（学员查询先
+    确认学员存在），本函数只读取列表内容，不访问数据库也不修改任何记录。
+    """
+    if title_contains is None:
+        return courses
+    title_contains = title_contains.strip()
+    if not title_contains:
+        raise ValidationError(ERR_EMPTY_TITLE_FILTER)
+    return [
+        course for course in courses if title_contains in course["title"]
+    ]
+
+
 def connect(db_path):
     """打开（必要时创建）数据库并确保表结构存在。父目录需已存在。"""
     conn = sqlite3.connect(db_path)
@@ -126,18 +147,11 @@ def list_courses(conn, title_contains=None):
     匹配，不匹配章节名称，百分号、下划线、引号等字符一律按普通字符
     处理。显式传入空字符串或仅含空白的筛选词时抛出
     ValidationError(ERR_EMPTY_TITLE_FILTER)。筛选为只读操作，不修改
-    任何记录。
+    任何记录。筛选词处理与标题匹配规则与 list_learner_courses 共用
+    _filter_courses_by_title。
     """
-    if title_contains is not None:
-        title_contains = title_contains.strip()
-        if not title_contains:
-            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
     courses = _list_course_overviews(conn, _ALL_COURSES_SCOPE)
-    if title_contains is not None:
-        courses = [
-            course for course in courses if title_contains in course["title"]
-        ]
-    return courses
+    return _filter_courses_by_title(courses, title_contains)
 
 
 def rename_course(conn, course_id, title):
@@ -574,7 +588,9 @@ def list_learner_courses(conn, learner_id, title_contains=None):
     名称或其他学员报名的课程，百分号、下划线、引号等字符一律按普通
     字符处理。学员存在且显式传入空字符串或仅含空白的筛选词时抛出
     ValidationError(ERR_EMPTY_TITLE_FILTER)；学员不存在时即使筛选词
-    为空也返回 None，不抛出 ValidationError。
+    为空也返回 None，不抛出 ValidationError。筛选词处理与标题匹配规则
+    与 list_courses 共用 _filter_courses_by_title，故须在本函数完成
+    学员存在性判定之后再调用。
     """
     if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
         return None
@@ -583,18 +599,10 @@ def list_learner_courses(conn, learner_id, title_contains=None):
     ).fetchone()
     if row is None:
         return None
-    if title_contains is not None:
-        title_contains = title_contains.strip()
-        if not title_contains:
-            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
     courses = _list_course_overviews(
         conn, _LEARNER_COURSES_SCOPE, (learner_id,)
     )
-    if title_contains is not None:
-        courses = [
-            course for course in courses if title_contains in course["title"]
-        ]
-    return courses
+    return _filter_courses_by_title(courses, title_contains)
 
 
 def list_course_learners(conn, course_id, name_contains=None):
