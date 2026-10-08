@@ -182,6 +182,10 @@ def build_parser():
     list_learner_courses_parser.add_argument(
         "learner_id", help="学员编号（正整数）"
     )
+    list_learner_courses_parser.add_argument(
+        "--title-contains",
+        help="按课程标题片段筛选：去除首尾空白后做大小写敏感的连续子串匹配",
+    )
     return parser
 
 
@@ -313,7 +317,13 @@ def main(argv=None):
             if learner_id is None:
                 print(ERR_BAD_LEARNER_ID, file=sys.stderr)
                 return 2
-            courses = list_learner_courses(conn, learner_id)
+            try:
+                courses = list_learner_courses(
+                    conn, learner_id, getattr(args, "title_contains", None)
+                )
+            except ValidationError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
             if courses is None:
                 print(ERR_LEARNER_NOT_FOUND, file=sys.stderr)
                 return 1

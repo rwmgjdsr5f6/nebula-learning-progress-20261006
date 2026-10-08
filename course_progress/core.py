@@ -559,7 +559,7 @@ def unenroll_learner(conn, learner_id, course_id):
     return {"learner_id": learner_id, "course_id": course_id}
 
 
-def list_learner_courses(conn, learner_id):
+def list_learner_courses(conn, learner_id, title_contains=None):
     """查询一个学员已报名的课程，按课程编号升序返回；学员不存在返回 None。
 
     每项为 {"course_id", "title", "chapter_count"}，标题与章节数使用课程
@@ -567,6 +567,14 @@ def list_learner_courses(conn, learner_id):
     完成状态；只列该学员实际报名的课程，同一课程至多出现一次。学员存在
     但尚未报名时返回空列表。超出 SQLite 整数范围的编号按不存在处理。
     查询为只读操作，不修改任何记录。
+
+    title_contains 省略或为 None 时返回该学员全部已报名课程；否则筛选词
+    先去除首尾空白（保留内部空白与大小写），再与课程当前保存的标题做
+    大小写敏感的连续子串匹配，只在该学员已报名课程中筛选，不匹配章节
+    名称或其他学员报名的课程，百分号、下划线、引号等字符一律按普通
+    字符处理。学员存在且显式传入空字符串或仅含空白的筛选词时抛出
+    ValidationError(ERR_EMPTY_TITLE_FILTER)；学员不存在时即使筛选词
+    为空也返回 None，不抛出 ValidationError。
     """
     if not _SQLITE_INT64_MIN <= learner_id <= _SQLITE_INT64_MAX:
         return None
@@ -575,9 +583,18 @@ def list_learner_courses(conn, learner_id):
     ).fetchone()
     if row is None:
         return None
-    return _list_course_overviews(
+    if title_contains is not None:
+        title_contains = title_contains.strip()
+        if not title_contains:
+            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
+    courses = _list_course_overviews(
         conn, _LEARNER_COURSES_SCOPE, (learner_id,)
     )
+    if title_contains is not None:
+        courses = [
+            course for course in courses if title_contains in course["title"]
+        ]
+    return courses
 
 
 def list_course_learners(conn, course_id, name_contains=None):
