@@ -62,6 +62,35 @@ WHERE e.learner_id = ?
 """
 
 
+def _normalize_title_filter(title_contains):
+    """课程标题筛选词的共有处理，返回可直接用于匹配的筛选词或 None。
+
+    None 表示不筛选；否则筛选词只去除首尾空白（保留内部空白与大小写），
+    去空白后为空的显式筛选词抛出 ValidationError(ERR_EMPTY_TITLE_FILTER)。
+    全部课程概览与学员课程概览共用本规则，保证两条查询对筛选词的处理
+    始终一致。调用方须先完成各自的前置判定（如学员存在性）再调用本函数。
+    """
+    if title_contains is None:
+        return None
+    title_contains = title_contains.strip()
+    if not title_contains:
+        raise ValidationError(ERR_EMPTY_TITLE_FILTER)
+    return title_contains
+
+
+def _filter_overviews_by_title(courses, title_contains):
+    """按标题片段筛选概览列表；title_contains 为 None 时原样返回。
+
+    匹配规则为对课程当前保存的标题做大小写敏感的连续子串匹配，不匹配
+    章节名称，百分号、下划线、引号等字符一律按普通字符处理；结果保持
+    原列表顺序（按课程编号升序）。title_contains 须先经
+    _normalize_title_filter 处理。
+    """
+    if title_contains is None:
+        return courses
+    return [course for course in courses if title_contains in course["title"]]
+
+
 def _list_course_overviews(conn, scope_sql, params=()):
     """按给定课程范围读取概览，每项整理为 course_id/title/chapter_count。
 
@@ -128,16 +157,9 @@ def list_courses(conn, title_contains=None):
     ValidationError(ERR_EMPTY_TITLE_FILTER)。筛选为只读操作，不修改
     任何记录。
     """
-    if title_contains is not None:
-        title_contains = title_contains.strip()
-        if not title_contains:
-            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
+    title_contains = _normalize_title_filter(title_contains)
     courses = _list_course_overviews(conn, _ALL_COURSES_SCOPE)
-    if title_contains is not None:
-        courses = [
-            course for course in courses if title_contains in course["title"]
-        ]
-    return courses
+    return _filter_overviews_by_title(courses, title_contains)
 
 
 def rename_course(conn, course_id, title):
@@ -583,18 +605,11 @@ def list_learner_courses(conn, learner_id, title_contains=None):
     ).fetchone()
     if row is None:
         return None
-    if title_contains is not None:
-        title_contains = title_contains.strip()
-        if not title_contains:
-            raise ValidationError(ERR_EMPTY_TITLE_FILTER)
+    title_contains = _normalize_title_filter(title_contains)
     courses = _list_course_overviews(
         conn, _LEARNER_COURSES_SCOPE, (learner_id,)
     )
-    if title_contains is not None:
-        courses = [
-            course for course in courses if title_contains in course["title"]
-        ]
-    return courses
+    return _filter_overviews_by_title(courses, title_contains)
 
 
 def list_course_learners(conn, course_id, name_contains=None):
